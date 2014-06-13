@@ -218,7 +218,7 @@ module.exports = function (opts) {
 			if(options.storage.type == 'local') {
 				if (!fs.existsSync(file.path)) { return; }
 				if (!fs.existsSync(valid)) { fs.mkdirSync(valid); }
-				fileData.path = validpath;
+				fileData.path = filename + "/" + fileInfo.name;
 				fileData.size = file.size;
 //				console.log(file.path, validpath);
 				fs.renameSync(file.path, validpath);
