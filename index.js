@@ -3,7 +3,6 @@ module.exports = function (opts) {
         fs = require('fs'),
         _existsSync = fs.existsSync || path.existsSync,
         mkdirp = require('mkdirp'),
-        AWS = require('aws-sdk'),
         formidable = require('formidable'),
         nameCountRegexp = /(?:(?: \(([\d]+)\))?(\.[^.]+))?$/,
         s3,
@@ -34,14 +33,7 @@ module.exports = function (opts) {
                 allowHeaders: (opts.accessControl && opts.accessControl.allowHeaders) ? opts.accessControl.allowHeaders : 'Content-Type, Content-Range, Content-Disposition'
             },
             storage : {
-                type : (opts.storage && opts.storage.type) ? opts.storage.type : "local",
-                aws : {
-                    accessKeyId : (opts.storage && opts.storage.aws && opts.storage.aws.accessKeyId) ? opts.storage.aws.accessKeyId : null,
-                    secretAccessKey : (opts.storage && opts.storage.aws && opts.storage.aws.secretAccessKey) ? opts.storage.aws.secretAccessKey : null,
-                    region : (opts.storage && opts.storage.aws && opts.storage.aws.region) ? opts.storage.aws.region : null,
-                    bucketName : (opts.storage && opts.storage.aws && opts.storage.aws.bucketName) ? opts.storage.aws.bucketName : null,
-                    acl : (opts.storage && opts.storage.aws && opts.storage.aws.acl) ? opts.storage.aws.acl : 'public-read'
-                }
+                type : (opts.storage && opts.storage.type) ? opts.storage.type : "local"
             }
         };
 
@@ -52,27 +44,6 @@ module.exports = function (opts) {
         checkExists(options.uploadDir);
         if(options.copyImgAsThumb) checkExists(options.uploadDir+'/thumbnail');
     }
-    else if(opts.storage.type === "aws")
-    {
-        if(!opts.storage.aws.accessKeyId || !opts.storage.aws.secretAccessKey || !opts.storage.aws.bucketName)
-        {
-            throw new Error("Please enter valid AWS S3 details");
-        }
-        else
-        {
-            // init aws
-            AWS.config.update({
-                accessKeyId: options.storage.aws.accessKeyId, 
-                secretAccessKey: options.storage.aws.secretAccessKey
-            });
-            if(options.storage.aws.region) AWS.config.region = options.storage.aws.region;
-            s3 = new AWS.S3({computeChecksums: true});
-        }
-    }
-
-    // AWS Random UUID
-    /* https://gist.github.com/jed/982883#file-index-js */
-    function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)}
 
 
     // check if upload folders exists
@@ -102,23 +73,6 @@ module.exports = function (opts) {
       else if (fn.indexOf('.jpg') >= 0) rc = 'image/jpg';
 
       return rc;
-    }
-
-    function uploadFile(remoteFilename, fileName, callback) {
-      var fileBuffer = fs.readFileSync(fileName);
-      var metaData = getContentTypeByFile(fileName);
-      
-      s3.putObject({
-        ACL: options.storage.aws.acl,
-        Bucket: options.storage.aws.bucketName,
-        Key: remoteFilename,
-        Body: fileBuffer,
-        ContentType: metaData
-      }, function(error, response) {
-        var params = {Bucket: options.storage.aws.bucketName, Key: remoteFilename};
-        var url = s3.getSignedUrl('getObject', params);
-        callback({ url : url}); 
-      });   
     }
 
     var utf8encode = function (str) {
@@ -215,36 +169,6 @@ module.exports = function (opts) {
                 });
             });
         }
-        else if(options.storage.type == 'aws')
-        {
-            var params = {
-              Bucket: options.storage.aws.bucketName, // required
-              //Delimiter: 'STRING_VALUE',
-              //EncodingType: 'url',
-              //Marker: 'STRING_VALUE',
-              //MaxKeys: 0,
-              //Prefix: 'STRING_VALUE',
-            };
-            s3.listObjects(params, function(err, data) {
-              if (err) console.log(err, err.stack); // an error occurred
-              //else     console.log(data);           // successful response
-
-              data.Contents.forEach(function(o){
-                    fileInfo = new FileInfo({
-                        name: options.UUIDRegex.test(o.Key) ? o.Key.split('__')[1] : o.Key,
-                        size: o.Size
-                    });
-                    sss = {url : (options.useSSL ? 'https:' : 'http:')+'//s3.amazonaws.com/'+options.storage.aws.bucketName+'/'+o.Key }
-                    fileInfo.initUrls(req, sss);
-                    files.push(fileInfo);
-
-              });
-              
-                callback({
-                    files: files
-                });
-            });
-        }
     };
 
     fileUploader.post = function (req, res, callback) {
@@ -276,6 +200,7 @@ module.exports = function (opts) {
             map[path.basename(file.path)] = fileInfo;
             files.push(fileInfo);
         }).on('field', function (name, value) {
+            console.log(name, value);
             if (name === 'redirect') {
                 redirect = value;
             }
@@ -307,12 +232,6 @@ module.exports = function (opts) {
                     }
                 });
             }
-            }
-            else if(options.storage.type == 'aws')
-            {
-                uploadFile((b()+'__'+fileInfo.name), file.path, function(sss){
-                    finish(sss);
-                });
             }
         }).on('aborted', function () {
             tmpFiles.forEach(function (file) {
@@ -355,21 +274,6 @@ module.exports = function (opts) {
             }
             callback({
                 success: false
-            });
-        }
-        else if(options.storage.type == 'aws')
-        {
-            var params = {
-              Bucket: options.storage.aws.bucketName, // required
-              Key: decodeURIComponent(req.url.split('/')[req.url.split('/').length - 1]) // required
-            };
-            console.log(params);
-            s3.deleteObject(params, function(err, data) {
-              if (err) console.log(err, err.stack); // an error occurred
-              else     console.log(data);           // successful response
-                  callback({
-                    success: data
-                });
             });
         }
     };
