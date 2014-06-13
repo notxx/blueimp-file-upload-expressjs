@@ -14,19 +14,12 @@ module.exports = function (opts) {
 			minFileSize: opts.minFileSize || 1,
 			maxFileSize: opts.maxFileSize || 10000000000, // 10 GB
 			acceptFileTypes: opts.acceptFileTypes || /.+/i,
-			copyImgAsThumb: opts.copyImgAsThumb && true,
 			useSSL: opts.useSSL || false,
 			UUIDRegex : /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/,
 			// Files not matched by this regular expression force a download dialog,
 			// to prevent executing any scripts in the context of the service domain:
 			inlineFileTypes: opts.inlineFileTypes || /\.(gif|jpe?g|png)/i,
 			imageTypes: opts.imageTypes || /\.(gif|jpe?g|png)/i,
-			imageVersions: {
-				'thumbnail': {
-					width: (opts.imageVersions && opts.imageVersions.width) ? opts.imageVersions.width : 80,
-					height: (opts.imageVersions && opts.imageVersions.height) ? opts.imageVersions.height : 80
-				}
-			},
 			accessControl: {
 				allowOrigin: (opts.accessControl && opts.accessControl.allowOrigin) ? opts.accessControl.allowOrigin : '*',
 				allowMethods: (opts.accessControl && opts.accessControl.allowMethods) ? opts.accessControl.allowMethods : 'OPTIONS, HEAD, GET, POST, PUT, DELETE',
@@ -42,7 +35,6 @@ module.exports = function (opts) {
 	{
 		checkExists(options.tmpDir);
 		checkExists(options.uploadDir);
-		if(options.copyImgAsThumb) checkExists(options.uploadDir+'/thumbnail');
 	}
 
 
@@ -106,23 +98,12 @@ module.exports = function (opts) {
 					'//' + req.headers.host + options.uploadUrl;
 				that.url = baseUrl + encodeURIComponent(that.name);
 				that.deleteUrl = baseUrl +encodeURIComponent(that.name);
-				Object.keys(options.imageVersions).forEach(function (version) {
-					if (_existsSync(
-							options.uploadDir+ '/' + version + '/' + that.name
-					)) {
-						that[version + 'Url'] = baseUrl + version + '/' +
-							encodeURIComponent(that.name);
-					}
-				});
 			}
 			else{
 				that.url = sss.url;
 				that.deleteUrl = options.uploadUrl + sss.url.split('/')[sss.url.split('/').length - 1].split('?')[0];
 				if(options.imageTypes.test(sss.url))
 				{
-					Object.keys(options.imageVersions).forEach(function (version) {
-						that[version+'Url'] = sss.url;
-					}); 
 				}
 			}
 		}
@@ -189,6 +170,8 @@ module.exports = function (opts) {
 		var form = new formidable.IncomingForm(),
 			tmpFiles = [],
 			files = [],
+			formData = {},
+			fileData = {},
 			map = {},
 			counter = 1,
 			redirect,
@@ -200,6 +183,9 @@ module.exports = function (opts) {
 					});
 					callback({
 						files: files
+					}, {
+						form: formData,
+						file: fileData
 					}, redirect);
 				}
 			};
@@ -213,37 +199,29 @@ module.exports = function (opts) {
 			map[path.basename(file.path)] = fileInfo;
 			files.push(fileInfo);
 		}).on('field', function (name, value) {
-			console.log(name, value);
+//			console.log(name, value);
+			formData[name] = value;
 			if (name === 'redirect') {
 				redirect = value;
 			}
 		}).on('file', function (name, file) {
-			var fileInfo = map[path.basename(file.path)];
+			var filename = path.basename(file.path);
+			var fileInfo = map[filename];
 			fileInfo.size = file.size;
 			if (!fileInfo.validate()) {
 				fs.unlink(file.path);
 				return;
 			}
 			// part ways here
+			var valid = options.uploadDir + "/" + filename;
+			var validpath = valid + "/" + fileInfo.name;
 			if(options.storage.type == 'local') {
-				fs.renameSync(file.path, options.uploadDir + '/' + fileInfo.name);
-				if (options.copyImgAsThumb && options.imageTypes.test(fileInfo.name)) {
-					Object.keys(options.imageVersions).forEach(function (version) {
-						counter += 1;
-						var opts = options.imageVersions[version];
-						if (options.copyImgAsThumb) {
-							fs.readFile(options.uploadDir + '/' + fileInfo.name, function (err, data) {
-								if (err) throw err;
-								fs.writeFile(options.uploadDir + '/' + version + '/' +
-									fileInfo.name, data, function (err, stderr, stdout) {
-										if (err) throw err;
-										//console.log(err, stderr, stdout)
-										finish();
-									});
-							});
-						}
-					});
-				}
+				if (!fs.existsSync(file.path)) { return; }
+				if (!fs.existsSync(valid)) { fs.mkdirSync(valid); }
+				fileData.path = validpath;
+				fileData.size = file.size;
+//				console.log(file.path, validpath);
+				fs.renameSync(file.path, validpath);
 			}
 		}).on('aborted', function () {
 			tmpFiles.forEach(function (file) {
@@ -272,11 +250,6 @@ module.exports = function (opts) {
 				fileName = path.basename(decodeURIComponent(req.url));
 				if (fileName[0] !== '.') {
 					fs.unlink(options.uploadDir + '/' + fileName, function (ex) {
-						Object.keys(options.imageVersions).forEach(function (version) {
-							fs.unlink(options.uploadDir + '/' + version + '/' + fileName, function (err) {
-								//if (err) throw err;
-							});
-						});
 						callback({
 							success: !ex
 						});
